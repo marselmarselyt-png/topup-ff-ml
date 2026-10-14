@@ -1,0 +1,108 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         String    @default("customer") // customer | admin
+  createdAt    DateTime  @default(now())
+  orders       Order[]
+  sessions     Session[]
+}
+
+model Session {
+  id        String   @id // token acak, disimpan di cookie httpOnly
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Product {
+  id        String  @id @default(cuid())
+  game      String // "FF" | "ML"
+  sku       String  @unique // kode SKU distributor
+  name      String
+  diamonds  Int
+  basePrice Int // harga modal dari distributor (IDR)
+  price     Int // harga jual ke pelanggan (IDR)
+  feeType   String  @default("flat") // flat | percent
+  feeValue  Int     @default(0) // flat: rupiah, percent: persen
+  active    Boolean @default(true)
+  sortOrder Int     @default(0)
+  orders    Order[]
+}
+
+model Order {
+  id             String   @id @default(cuid())
+  orderCode      String   @unique // kode publik, mis. TRX-AB12CD
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id])
+  game           String
+  gameUserId     String
+  gameZoneId     String?
+  productId      String
+  product        Product  @relation(fields: [productId], references: [id])
+  productName    String // snapshot saat order dibuat
+  price          Int // snapshot harga
+  fee            Int // snapshot biaya admin
+  total          Int
+  status         String   @default("PENDING_PAYMENT")
+  // PENDING_PAYMENT -> PAID -> FULFILLING -> SUCCESS | FAILED
+  // FAILED -> REFUNDED | FULFILLING (retry), PAID -> REFUNDED,
+  // PENDING_PAYMENT -> EXPIRED
+  idempotencyKey String   @unique
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  payment        Payment?
+  fulfillments   Fulfillment[]
+  auditLogs      AuditLog[]
+}
+
+model Payment {
+  id            String    @id @default(cuid())
+  orderId       String    @unique
+  order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider      String // mockpay | midtrans | xendit | ...
+  method        String    @default("QRIS")
+  externalId    String    @unique // referensi kita di gateway (invoice id)
+  transactionId String?   @unique // id transaksi resmi dari notifikasi gateway — dedup
+  amount        Int
+  status        String    @default("PENDING") // PENDING | PAID | FAILED | EXPIRED
+  qrPayload     String?
+  paidAt        DateTime?
+  rawCallback   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Fulfillment {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider  String // mockdist | digiflazz | ...
+  refId     String?  @unique
+  status    String // REQUESTED | SUCCESS | FAILED
+  serialNo  String? // bukti/SN dari distributor
+  message   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  orderId   String?
+  order     Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  actor     String // system | user | admin | webhook | distributor
+  action    String
+  detail    String?
+  createdAt DateTime @default(now())
+}

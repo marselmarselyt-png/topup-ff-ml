@@ -1,36 +1,64 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# TopUpKu — Platform Top Up Diamond FF & ML
 
-## Getting Started
+MVP platform top up diamond **Free Fire** dan **Mobile Legends**: transaksi cepat, aman, transparan, dan legal melalui jalur distributor resmi.
 
-First, run the development server:
+## Stack
+
+- **Next.js 16** (App Router) + TypeScript + Tailwind CSS 4
+- **Prisma + SQLite** (mudah diganti Postgres/MySQL)
+- **Vitest** untuk unit test
+- Auth: session cookie httpOnly + bcrypt
+- Arsitektur provider pluggable: payment gateway & distributor ditukar via env
+
+## Menjalankan
 
 ```bash
+npm install
+cp .env.example .env      # sesuaikan
+npm run db:push           # buat schema SQLite
+npm run db:seed           # admin + katalog produk
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Buka http://localhost:3000. Login admin: `ADMIN_EMAIL` / `ADMIN_PASSWORD` di `.env`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Mode Sandbox (default)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `PAYMENT_PROVIDER=mockpay` — QRIS palsu; tombol **"Simulasikan pembayaran"** di halaman checkout menempuh jalur webhook penuh (signature → parse → proses).
+- `DISTRIBUTOR_PROVIDER=mockdist` — fulfillment selalu berhasil dengan SN palsu; set `MOCK_DISTRIBUTOR_FAIL=1` untuk mensimulasikan kegagalan.
 
-## Learn More
+## Integrasi provider sungguhan
 
-To learn more about Next.js, take a look at the following resources:
+Tambahkan implementasi baru yang memenuhi interface:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `lib/payments/types.ts` (`PaymentProvider`) → daftarkan di `lib/payments/index.ts`, set `PAYMENT_PROVIDER` + `PAYMENT_WEBHOOK_SECRET`.
+- `lib/distributor/types.ts` (`DistributorProvider`) → daftarkan di `lib/distributor/index.ts`, set `DISTRIBUTOR_PROVIDER`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Kandidat umum: Digiflazz / VIP Reseller / ApiGames (distributor), Midtrans / Xendit / Tripay (payment).
 
-## Deploy on Vercel
+## Alur transaksi
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. Pilih game → input ID (User+Zone untuk ML, Player ID untuk FF) → opsional cek nickname.
+2. Pilih nominal → harga + biaya admin + total tampil sebelum checkout.
+3. Bayar via QRIS → gateway mengirim notifikasi ke `POST /api/webhooks/payment` (signature HMAC-SHA256 diverifikasi, `transaction_id` di-dedup).
+4. Setelah `PAID`, order diteruskan ke distributor **sekali saja** (klaim atomik `PAID→FULFILLING`).
+5. Status: `PENDING_PAYMENT → PAID → FULFILLING → SUCCESS | FAILED → REFUNDED | EXPIRED`.
+6. Setiap transisi tercatat di `AuditLog` — semua transaksi dapat ditelusuri.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Fitur utama
+
+- Katalog produk FF & ML (admin bisa ubah harga/fee/status aktif).
+- Idempotensi order (`idempotencyKey`) dan notifikasi pembayaran (`transactionId` unik).
+- Halaman status transaksi publik (`/transaksi` + `/checkout/<kode>`).
+- Akun pelanggan: register/login, riwayat transaksi.
+- Dashboard admin: statistik, daftar pesanan, edit produk, refund, retry fulfillment, audit trail.
+- Rate limiting endpoint sensitif; validasi input server-side (zod); tanpa password/OTP akun game.
+- Halaman legal: syarat layanan, refund, privasi, kontak.
+
+## Test
+
+```bash
+npm test          # vitest: pricing, state machine, idempotensi, webhook
+npm run build
+npm run lint
+```
